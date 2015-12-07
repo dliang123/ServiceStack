@@ -7,21 +7,19 @@ using ServiceStack.Text;
 using ServiceStack.Web;
 using ServiceStack.Host;
 
-namespace ServiceStack.NativeTypes.Java
+namespace ServiceStack.NativeTypes.Kotlin
 {
-    public class JavaGenerator
+    public class KotlinGenerator
     {
         readonly MetadataTypesConfig Config;
         readonly List<MetadataType> AllTypes;
         List<string> conflictTypeNames = new List<string>();
 
-        public JavaGenerator(MetadataTypesConfig config)
+        public KotlinGenerator(MetadataTypesConfig config)
         {
             Config = config;
             AllTypes = new List<MetadataType>();
         }
-
-        public static string DefaultGlobalNamespace = "dtos";
 
         public static List<string> DefaultImports = new List<string>
         {
@@ -61,9 +59,9 @@ namespace ServiceStack.NativeTypes.Java
             {"SByte", "Byte"},
             {"Byte", "Short"},
             {"Int16", "Short"},
-            {"Int32", "Integer"},
+            {"Int32", "Int"},
             {"Int64", "Long"},
-            {"UInt16", "Integer"},
+            {"UInt16", "Int"},
             {"UInt32", "Long"},
             {"UInt64", "BigInteger"},
             {"Single", "Float"},
@@ -98,8 +96,6 @@ namespace ServiceStack.NativeTypes.Java
                     defaultImports.Add(GSonReflectNamespace);
             }
 
-            var defaultNamespace = Config.GlobalNamespace ?? DefaultGlobalNamespace;
-
             Func<string, string> defaultValue = k =>
                 request.QueryString[k].IsNullOrEmpty() ? "//" : "";
 
@@ -111,9 +107,6 @@ namespace ServiceStack.NativeTypes.Java
             sb.AppendLine("BaseUrl: {0}".Fmt(Config.BaseUrl));
             sb.AppendLine();
             sb.AppendLine("{0}Package: {1}".Fmt(defaultValue("Package"), Config.Package));
-            sb.AppendLine("{0}GlobalNamespace: {1}".Fmt(defaultValue("GlobalNamespace"), defaultNamespace));
-            sb.AppendLine("{0}AddPropertyAccessors: {1}".Fmt(defaultValue("AddPropertyAccessors"), Config.AddPropertyAccessors));
-            sb.AppendLine("{0}SettersReturnThis: {1}".Fmt(defaultValue("SettersReturnThis"), Config.SettersReturnThis));
             sb.AppendLine("{0}AddServiceStackTypes: {1}".Fmt(defaultValue("AddServiceStackTypes"), Config.AddServiceStackTypes));
             sb.AppendLine("{0}AddResponseStatus: {1}".Fmt(defaultValue("AddResponseStatus"), Config.AddResponseStatus));
             sb.AppendLine("{0}AddImplicitVersion: {1}".Fmt(defaultValue("AddImplicitVersion"), Config.AddImplicitVersion));
@@ -132,7 +125,7 @@ namespace ServiceStack.NativeTypes.Java
 
             if (Config.Package != null)
             {
-                sb.AppendLine("package {0};".Fmt(Config.Package));
+                sb.AppendLine("package {0}".Fmt(Config.Package));
                 sb.AppendLine();
             }
 
@@ -162,11 +155,8 @@ namespace ServiceStack.NativeTypes.Java
                 .Where(x => conflictPartialNames.Any(name => x.Name.StartsWith(name)))
                 .Map(x => x.Name);
 
-            defaultImports.Each(x => sb.AppendLine("import {0};".Fmt(x)));
+            defaultImports.Each(x => sb.AppendLine("import {0}".Fmt(x)));
             sb.AppendLine();
-
-            sb.AppendLine("public class {0}".Fmt(defaultNamespace.SafeToken()));
-            sb.AppendLine("{");
 
             //ServiceStack core interfaces
             foreach (var type in AllTypes)
@@ -230,8 +220,6 @@ namespace ServiceStack.NativeTypes.Java
                 }
             }
 
-            sb.AppendLine();
-            sb.AppendLine("}");
 
             return sb.ToString();
         }
@@ -239,7 +227,7 @@ namespace ServiceStack.NativeTypes.Java
         private bool ReferencesGson(MetadataTypes metadata)
         {
             var allTypes = GetAllMetadataTypes(metadata);
-            return allTypes.Any(x => JavaGeneratorExtensions.JavaKeyWords.Contains(x.Name)
+            return allTypes.Any(x => KotlinGeneratorExtensions.KotlinKeyWords.Contains(x.Name)
                 || x.Properties.Safe().Any(p => p.DataMember != null && p.DataMember.Name != null)
                 || (x.ReturnMarkerTypeName != null && x.ReturnMarkerTypeName.Name.IndexOf('`') >= 0)); //uses TypeToken<T>
         }
@@ -270,7 +258,6 @@ namespace ServiceStack.NativeTypes.Java
         private string AppendType(ref StringBuilderWrapper sb, MetadataType type, string lastNS,
             CreateTypeOptions options)
         {
-            sb = sb.Indent();
 
             sb.AppendLine();
             AppendComments(sb, type.Description);
@@ -285,37 +272,37 @@ namespace ServiceStack.NativeTypes.Java
 
             if (type.IsEnum.GetValueOrDefault())
             {
-                sb.AppendLine("public static enum {0}".Fmt(typeName));
+                var hasIntValue = type.EnumNames.Count == (type.EnumValues != null ? type.EnumValues.Count : 0);
+                var enumConstructor = hasIntValue ? "(val value:Int)" : "";
+
+                sb.AppendLine("enum class {0}{1}".Fmt(typeName, enumConstructor));
                 sb.AppendLine("{");
                 sb = sb.Indent();
 
+
                 if (type.EnumNames != null)
                 {
-                    var hasIntValue = false;
                     for (var i = 0; i < type.EnumNames.Count; i++)
                     {
                         var name = type.EnumNames[i];
-                        var value = type.EnumValues != null ? type.EnumValues[i] : null;
+                        var value = hasIntValue ? type.EnumValues[i] : null;
 
-                        var delim = i == type.EnumNames.Count - 1 ? ";" : ",";
                         var serializeAs = JsConfig.TreatEnumAsInteger || (type.Attributes.Safe().Any(x => x.Name == "Flags"))
                             ? "@SerializedName(\"{0}\") ".Fmt(value)
                             : "";
 
                         sb.AppendLine(value == null
-                            ? "{0}{1}".Fmt(name.ToPascalCase(), delim)
-                            : serializeAs + "{0}({1}){2}".Fmt(name.ToPascalCase(), value, delim));
-
-                        hasIntValue = hasIntValue || value != null;
+                            ? "{0},".Fmt(name.ToPascalCase())
+                            : serializeAs + "{0}({1}),".Fmt(name.ToPascalCase(), value));
                     }
 
-                    if (hasIntValue)
-                    {
-                        sb.AppendLine();
-                        sb.AppendLine("private final int value;");
-                        sb.AppendLine("{0}(final int intValue) {{ value = intValue; }}".Fmt(typeName));
-                        sb.AppendLine("public int getValue() { return value; }");
-                    }
+                    //if (hasIntValue)
+                    //{
+                    //    sb.AppendLine();
+                    //    sb.AppendLine("private final int value;");
+                    //    sb.AppendLine("{0}(final int intValue) {{ value = intValue; }}".Fmt(typeName));
+                    //    sb.AppendLine("public int getValue() { return value; }");
+                    //}
                 }
 
                 sb = sb.UnIndent();
@@ -349,8 +336,8 @@ namespace ServiceStack.NativeTypes.Java
 
                             //Can't get .class from Generic Type definition
                             responseTypeExpression = returnType.Contains("<")
-                                ? "new TypeToken<{0}>(){{}}.getType()".Fmt(returnType)
-                                : "{0}.class".Fmt(returnType);
+                                ? "object : TypeToken<{0}>(){{}}.type".Fmt(returnType)
+                                : "{0}::class.java".Fmt(returnType);
                         }
                     }
                     if (!type.Implements.IsEmpty())
@@ -363,16 +350,13 @@ namespace ServiceStack.NativeTypes.Java
                 }
 
                 var extend = extends.Count > 0 
-                    ? " extends " + extends[0]
+                    ? " : " + extends[0] + "()"
                     : "";
 
                 if (interfaces.Count > 0)
-                    extend += " implements " + string.Join(", ", interfaces.ToArray());
+                    extend += (extend.IsNullOrEmpty() ? " : " : ", ") + string.Join(", ", interfaces.ToArray());
 
-                var addPropertyAccessors = Config.AddPropertyAccessors && !type.IsInterface();
-                var settersReturnType = addPropertyAccessors && Config.SettersReturnThis ? typeName : null;
-
-                sb.AppendLine("public static {0} {1}{2}".Fmt(defType, typeName, extend));
+                sb.AppendLine("open {0} {1}{2}".Fmt(defType, typeName, extend));
                 sb.AppendLine("{");
 
                 sb = sb.Indent();
@@ -380,46 +364,31 @@ namespace ServiceStack.NativeTypes.Java
                 var addVersionInfo = Config.AddImplicitVersion != null && options.IsRequest;
                 if (addVersionInfo)
                 {
-                    sb.AppendLine("public Integer {0} = {1};".Fmt("Version".PropertyStyle(), Config.AddImplicitVersion));
-
-                    if (addPropertyAccessors)
-                        sb.AppendPropertyAccessor("Integer", "Version", settersReturnType);
+                    sb.AppendLine("val {0}:Int = {1}".Fmt("Version".PropertyStyle(), Config.AddImplicitVersion));
                 }
 
                 AddProperties(sb, type,
                     includeResponseStatus: Config.AddResponseStatus && options.IsResponse
-                        && type.Properties.Safe().All(x => x.Name != typeof(ResponseStatus).Name),
-                    addPropertyAccessors: addPropertyAccessors,
-                    settersReturnType: settersReturnType);
+                        && type.Properties.Safe().All(x => x.Name != typeof(ResponseStatus).Name));
 
                 if (responseTypeExpression != null)
                 {
-                    sb.AppendLine("private static Object responseType = {0};".Fmt(responseTypeExpression));
-                    sb.AppendLine("public Object getResponseType() { return responseType; }");
+                    sb.AppendLine("companion object {{ private val responseType = {0} }}".Fmt(responseTypeExpression));
+                    sb.AppendLine("override fun getResponseType(): Any? = responseType");
                 }
 
                 sb = sb.UnIndent();
                 sb.AppendLine("}");
             }
 
-            sb = sb.UnIndent();
-
             return lastNS;
         }
 
-        public void AddProperties(StringBuilderWrapper sb, MetadataType type,
-            bool includeResponseStatus,
-            bool addPropertyAccessors,
-            string settersReturnType)
+        public void AddProperties(StringBuilderWrapper sb, MetadataType type, bool includeResponseStatus)
         {
             var wasAdded = false;
 
-            var sbAccessors = new StringBuilderWrapper(new StringBuilder());
-            if (addPropertyAccessors)
-            {
-                sbAccessors.AppendLine();
-                sbAccessors = sbAccessors.Indent().Indent();
-            }
+            var defaultValue = type.IsInterface != true ? " = null" : "";
 
             var dataMemberIndex = 1;
             if (type.Properties != null)
@@ -431,24 +400,20 @@ namespace ServiceStack.NativeTypes.Java
                     var propType = Type(prop.Type, prop.GenericArgs);
 
                     var fieldName = prop.Name.SafeToken().PropertyStyle();
-                    var accessorName = fieldName.ToPascalCase();
 
                     wasAdded = AppendDataMember(sb, prop.DataMember, dataMemberIndex++);
                     wasAdded = AppendAttributes(sb, prop.Attributes) || wasAdded;
 
                     if (!fieldName.IsKeyWord())
                     {
-                        sb.AppendLine("public {0} {1} = null;".Fmt(propType, fieldName));
+                        sb.AppendLine("var {0}:{1}?{2}".Fmt(fieldName, propType, defaultValue));
                     }
                     else
                     {
                         var originalName = fieldName;
-                        fieldName = Char.ToUpper(fieldName[0]) + fieldName.SafeSubstring(1);
-                        sb.AppendLine("@SerializedName(\"{0}\") public {1} {2} = null;".Fmt(originalName, propType, fieldName));
+                        fieldName = char.ToUpper(fieldName[0]) + fieldName.SafeSubstring(1);
+                        sb.AppendLine("@SerializedName(\"{0}\") var {1}:{2}?{3}".Fmt(originalName, fieldName, propType, defaultValue));
                     }
-
-                    if (addPropertyAccessors)
-                        sbAccessors.AppendPropertyAccessor(propType, fieldName, accessorName, settersReturnType);
                 }
             }
 
@@ -457,14 +422,8 @@ namespace ServiceStack.NativeTypes.Java
                 if (wasAdded) sb.AppendLine();
 
                 AppendDataMember(sb, null, dataMemberIndex++);
-                sb.AppendLine("public ResponseStatus {0} = null;".Fmt(typeof(ResponseStatus).Name.PropertyStyle()));
-
-                if (addPropertyAccessors)
-                    sbAccessors.AppendPropertyAccessor("ResponseStatus", "ResponseStatus", settersReturnType);
+                sb.AppendLine("var {0}:ResponseStatus{1}".Fmt(typeof(ResponseStatus).Name.PropertyStyle(), defaultValue));
             }
-
-            if (sbAccessors.Length > 0)
-                sb.AppendLine(sbAccessors.ToString().TrimEnd()); //remove last \n
         }
         
         public bool AppendAttributes(StringBuilderWrapper sb, List<MetadataAttribute> attributes)
@@ -761,15 +720,16 @@ namespace ServiceStack.NativeTypes.Java
         }
     }
 
-    public static class JavaGeneratorExtensions
+    public static class KotlinGeneratorExtensions
     {
         public static string InheritedType(this string type)
         {
             return type;
         }
 
-        public static HashSet<string> JavaKeyWords = new HashSet<string>
+        public static HashSet<string> KotlinKeyWords = new HashSet<string>
         {
+            //Java Keywords
             "abstract",
             "assert",
             "boolean",
@@ -818,11 +778,50 @@ namespace ServiceStack.NativeTypes.Java
             "void",
             "volatile",
             "while",
-        };
 
+            //Kotlin extra Keywords https://bitbucket.org/birkenfeld/pygments-main/pull-requests/505/update-list-of-kotlin-keywords-according/diff
+            "annotation",
+            "as",
+            "by",
+            "companion",
+            "const",
+            "constructor",
+            "crossinline",
+            "data",
+            "dynamic",
+            "external",
+            "fun",
+            "get",
+            "in",
+            "inner",
+            "internal",
+            "in",
+            "infix",
+            "inline",
+            "inner",
+            "is",
+            "lateinit",
+            "noinline",
+            "object",
+            "open",
+            "operator",
+            "out",
+            "reified",
+            "set",
+            "sealed",
+            "tailrec",
+            "trait",
+            "type",
+            "val",
+            "var",
+            "vararg",
+            "when",
+            "where",
+        };
+        
         public static bool IsKeyWord(this string name)
         {
-            return JavaKeyWords.Contains(name);
+            return KotlinKeyWords.Contains(name);
         }
 
         public static string PropertyStyle(this string name)
